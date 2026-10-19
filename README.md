@@ -1,15 +1,57 @@
 # zulip_watcher
 
-Blocks until **one** new Zulip message arrives in a channel (optionally a topic),
-prints it to stdout and exits. Built for agents waiting on a human: run it once
-and sleep in the process wait instead of polling.
+[![CI](https://github.com/korjavin/zulip_watcher/actions/workflows/ci.yml/badge.svg)](https://github.com/korjavin/zulip_watcher/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/korjavin/zulip_watcher.svg)](https://pkg.go.dev/github.com/korjavin/zulip_watcher)
+[![Go Report Card](https://goreportcard.com/badge/github.com/korjavin/zulip_watcher)](https://goreportcard.com/report/github.com/korjavin/zulip_watcher)
+[![License: MIT](https://img.shields.io/github/license/korjavin/zulip_watcher)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/korjavin/zulip_watcher)](https://github.com/korjavin/zulip_watcher/releases/latest)
+
+**Let your AI agent wait for a human reply in [Zulip](https://zulip.com) without polling.**
+`zulip_watcher` blocks on Zulip's real-time events, prints the next message in a
+channel (optionally a topic) to stdout, and exits. Made for LLM agents such as
+Claude Code and Codex that need a human-in-the-loop answer, and for plain shell scripts.
 
 ```sh
 export ZULIP_URL=https://chat.example.com ZULIP_EMAIL=bot@example.com ZULIP_API_KEY=...
 msg=$(zulip_watcher -stream ops -topic deploy -timeout 1h) || echo "no answer"
 ```
 
+## Why
+
+An agent that asks a human a question in Zulip then has to wait for the reply. The usual options are bad:
+
+- **Sleep and poll.** Every wake-up is another agent turn that re-reads the whole
+  conversation context, so you pay tokens for "no new message yet", add latency
+  between polls, and fill the transcript with noisy tool output.
+- **A long-running loop.** The agent burns a process and a turn budget just to sit there.
+
+`zulip_watcher` instead uses Zulip's real-time events long-poll: one process,
+idle on the network, zero tokens while waiting. It wakes the agent exactly once,
+with only the new message.
+
+| | Poll loop | `zulip_watcher` |
+|---|---|---|
+| Tokens while waiting | A full agent turn per poll | None |
+| Reply latency | Up to one poll interval | Immediate |
+| Tool output | One "nothing yet" per poll | Only the reply |
+| Agent wake-ups | Many | Exactly one |
+| Dependencies | Your own loop and parsing | Single static binary, Go stdlib only |
+
+## How it works
+
+1. Registers an event queue with the Zulip API, narrowed to your channel (and topic).
+   See [register an event queue](https://zulip.com/api/register-queue).
+2. Long-polls [`GET /events`](https://zulip.com/api/get-events) (see the
+   [real-time events API](https://zulip.com/api/real-time-events)); the server holds
+   the request open until something happens.
+3. Ignores messages sent by the bot itself.
+4. Prints the first other message and exits (the event queue is deleted on the way out).
+
 ## Install
+
+Download a binary for Linux, macOS or Windows (amd64 / arm64) from the
+[latest release](https://github.com/korjavin/zulip_watcher/releases/latest), make it
+executable and put it on your `PATH`. Or with Go:
 
 ```sh
 go install github.com/korjavin/zulip_watcher@latest
@@ -18,7 +60,24 @@ go install github.com/korjavin/zulip_watcher@latest
 
 Stdlib only, single static binary named `zulip_watcher`.
 
-## Agent usage
+You need a Zulip bot: see [Zulip's guide to creating a bot](https://zulip.com/help/add-a-bot-or-integration)
+for the bot email and API key.
+
+## Usage
+
+### With Claude Code
+
+Run it in the background so the agent is only woken when the reply lands:
+
+```
+Bash(command: "zulip_watcher -stream ops -topic deploy -timeout 1h", run_in_background: true)
+```
+
+The Bash tool notifies the agent when the process exits; its output is the human's
+reply. A ready-made skill, `zulip-wait`, lives in
+[claude-common-skills](https://github.com/korjavin/claude-common-skills/tree/master/skills/zulip-wait).
+
+### Generic agents and shell scripts
 
 ```sh
 if msg=$(zulip_watcher -stream ops -topic deploy -timeout 1h); then
@@ -76,8 +135,20 @@ Diagnostics go to stderr only.
 | 2    | Usage error: missing `-stream`, missing env var, bad flag      |
 | 3    | `-timeout` elapsed with no matching message (stdout empty)     |
 
-## Caveats
+## FAQ and limitations
 
-- Public channels work without a subscription; **private channels require the bot to be subscribed**.
-- If the server drops the event queue (≈10 min idle, server restart), the tool
-  registers a fresh one and keeps waiting; **messages sent during that gap are lost**.
+- **Private channels?** Public channels work without a subscription; private
+  channels require the bot to be subscribed.
+- **Is a reply sent between two runs delivered?** No. "New" means sent after the
+  tool started, so a message that arrives in the gap between one run exiting and
+  the next starting is not seen. Start the watcher before (or right after) asking
+  your question.
+- **What if the event queue expires?** If the server drops it (about 10 minutes
+  idle, server restart), the tool registers a fresh one and keeps waiting;
+  **messages sent during that re-register gap are lost**.
+- **Only one message?** Yes, by design: it exits after the first message from someone
+  else. Run it again to wait for the next.
+
+## License
+
+[MIT](LICENSE)
