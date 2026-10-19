@@ -1,20 +1,33 @@
-# zulip-watcher
+# zulip_watcher
 
 Blocks until **one** new Zulip message arrives in a channel (optionally a topic),
 prints it to stdout and exits. Built for agents waiting on a human: run it once
 and sleep in the process wait instead of polling.
 
 ```sh
-msg=$(zulip-watcher -stream ops -topic deploy -timeout 1h) || echo "no answer"
+export ZULIP_URL=https://chat.example.com ZULIP_EMAIL=bot@example.com ZULIP_API_KEY=...
+msg=$(zulip_watcher -stream ops -topic deploy -timeout 1h) || echo "no answer"
 ```
 
 ## Install
 
 ```sh
-go install .        # or: go build -o zulip-watcher .
+go install github.com/korjavin/zulip_watcher@latest
+# or from a checkout: go build .
 ```
 
-Stdlib only, single static binary.
+Stdlib only, single static binary named `zulip_watcher`.
+
+## Agent usage
+
+```sh
+if msg=$(zulip_watcher -stream ops -topic deploy -timeout 1h); then
+  sender=${msg%%$'\n'*}   # "<sender_email> | <stream> > <topic> | id=<id>"
+  body=${msg#*$'\n'}      # raw Markdown the human typed
+else
+  echo "no answer (exit $?)"
+fi
+```
 
 ## Configuration
 
@@ -22,8 +35,8 @@ Credentials come from the environment only (never flags, so the key stays out of
 
 | Variable        | Meaning                                                      |
 |-----------------|--------------------------------------------------------------|
-| `ZULIP_URL`     | Server URL, e.g. `https://zulip.example.com` (trailing `/` ok) |
-| `ZULIP_EMAIL`   | Bot email                                                    |
+| `ZULIP_URL`     | Server URL, e.g. `https://chat.example.com` (trailing `/` ok) |
+| `ZULIP_EMAIL`   | Bot email, e.g. `bot@example.com`                            |
 | `ZULIP_API_KEY` | Bot API key                                                  |
 
 Flags:

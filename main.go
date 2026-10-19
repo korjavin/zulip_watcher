@@ -1,4 +1,4 @@
-// zulip-watcher blocks until one new Zulip message arrives in a channel
+// zulip_watcher blocks until one new Zulip message arrives in a channel
 // (optionally a topic), prints it to stdout and exits.
 package main
 
@@ -84,13 +84,13 @@ func (c *client) do(ctx context.Context, method, path string, form url.Values) (
 }
 
 func run(args []string, getenv func(string) string, stdout io.Writer) int {
-	fs := flag.NewFlagSet("zulip-watcher", flag.ContinueOnError)
+	fs := flag.NewFlagSet("zulip_watcher", flag.ContinueOnError)
 	stream := fs.String("stream", "", "channel name to watch (required)")
 	topic := fs.String("topic", "", "topic to watch (optional)")
 	timeout := fs.Duration("timeout", 0, "give up after this long, e.g. 30m (0 = wait forever)")
 	asJSON := fs.Bool("json", false, "print the message as one JSON object")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "usage: zulip-watcher -stream NAME [-topic NAME] [-timeout DUR] [-json]")
+		fmt.Fprintln(fs.Output(), "usage: zulip_watcher -stream NAME [-topic NAME] [-timeout DUR] [-json]")
 		fmt.Fprintln(fs.Output(), "env: ZULIP_URL, ZULIP_EMAIL, ZULIP_API_KEY (required)")
 		fs.PrintDefaults()
 	}
@@ -133,10 +133,10 @@ func run(args []string, getenv func(string) string, stdout io.Writer) int {
 
 	fail := func(err error) int {
 		if ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "zulip-watcher: timeout, no message")
+			fmt.Fprintln(os.Stderr, "zulip_watcher: timeout, no message")
 			return 3
 		}
-		fmt.Fprintln(os.Stderr, "zulip-watcher:", err)
+		fmt.Fprintln(os.Stderr, "zulip_watcher:", err)
 		return 1
 	}
 
