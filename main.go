@@ -181,15 +181,20 @@ func run(args []string, getenv func(string) string, stdout io.Writer) int {
 			if !ok {
 				name = *stream
 			}
+			var err error
 			if *asJSON {
 				enc := json.NewEncoder(stdout)
 				enc.SetEscapeHTML(false)
-				enc.Encode(map[string]any{
+				err = enc.Encode(map[string]any{
 					"id": m.ID, "sender_email": m.SenderEmail, "sender_full_name": m.SenderFullName,
 					"stream": name, "topic": m.Subject, "timestamp": m.Timestamp, "content": m.Content,
 				})
 			} else {
-				fmt.Fprintf(stdout, "%s | %s > %s | id=%d\n%s\n", m.SenderEmail, name, m.Subject, m.ID, m.Content)
+				_, err = fmt.Fprintf(stdout, "%s | %s > %s | id=%d\n%s\n", m.SenderEmail, name, m.Subject, m.ID, m.Content)
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "zulip_watcher: write stdout:", err)
+				return 1
 			}
 			return 0
 		}
