@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "zulip_watcher",
+  "project_id": "ef4fbf48-a84a-4b52-8b7c-75189cec5c85"
+}
