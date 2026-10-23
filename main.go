@@ -37,7 +37,14 @@ type apiResp struct {
 	Code        string `json:"code"`
 	QueueID     string `json:"queue_id"`
 	LastEventID int64  `json:"last_event_id"`
-	Events      []struct {
+	StreamID    int64  `json:"stream_id"`
+	Stream      struct {
+		Name string `json:"name"`
+	} `json:"stream"`
+	Topics []struct {
+		Name string `json:"name"`
+	} `json:"topics"`
+	Events []struct {
 		ID      int64    `json:"id"`
 		Type    string   `json:"type"`
 		Message *message `json:"message"`
@@ -85,12 +92,12 @@ func (c *client) do(ctx context.Context, method, path string, form url.Values) (
 
 func run(args []string, getenv func(string) string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("zulip_watcher", flag.ContinueOnError)
-	stream := fs.String("stream", "", "channel name to watch (required)")
+	stream := fs.String("stream", "", "channel name or ID to watch (required)")
 	topic := fs.String("topic", "", "topic to watch (optional)")
 	timeout := fs.Duration("timeout", 0, "give up after this long, e.g. 30m (0 = wait forever)")
 	asJSON := fs.Bool("json", false, "print the message as one JSON object")
 	fs.Usage = func() {
-		fmt.Fprintln(fs.Output(), "usage: zulip_watcher -stream NAME [-topic NAME] [-timeout DUR] [-json]")
+		fmt.Fprintln(fs.Output(), "usage: zulip_watcher -stream NAME|ID [-topic NAME] [-timeout DUR] [-json]")
 		fmt.Fprintln(fs.Output(), "env: ZULIP_URL, ZULIP_EMAIL, ZULIP_API_KEY (required)")
 		fs.PrintDefaults()
 	}
@@ -108,6 +115,44 @@ func run(args []string, getenv func(string) string, stdout io.Writer) int {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, *timeout)
 		defer cancel()
+	}
+
+	fail := func(err error) int {
+		if ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "zulip_watcher: timeout, no message")
+			return 3
+		}
+		fmt.Fprintln(os.Stderr, "zulip_watcher:", err)
+		return 1
+	}
+
+	// Register silently accepts unknown channels and waits forever, so check first.
+	// https://zulip.com/api/get-stream-id, /api/get-stream-by-id, /api/get-stream-topics
+	r, err := c.do(ctx, http.MethodGet, "/api/v1/get_stream_id", url.Values{"stream": {*stream}})
+	if err != nil {
+		id, convErr := strconv.ParseInt(*stream, 10, 64)
+		if convErr != nil {
+			return fail(fmt.Errorf("unknown channel %q: %w", *stream, err))
+		}
+		if r, err = c.do(ctx, http.MethodGet, "/api/v1/streams/"+*stream, nil); err != nil {
+			return fail(fmt.Errorf("unknown channel %q (no channel with that name or ID): %w", *stream, err))
+		}
+		fmt.Fprintf(os.Stderr, "zulip_watcher: resolved channel id %d to %q\n", id, r.Stream.Name)
+		*stream = r.Stream.Name
+		r.StreamID = id
+	}
+	if *topic != "" {
+		t, err := c.do(ctx, http.MethodGet, "/api/v1/users/me/"+strconv.FormatInt(r.StreamID, 10)+"/topics", nil)
+		if err != nil {
+			return fail(fmt.Errorf("list topics: %w", err))
+		}
+		found := false
+		for _, x := range t.Topics {
+			found = found || strings.EqualFold(x.Name, *topic)
+		}
+		if !found { // not fatal: the agent may start watching before posting to a new topic
+			fmt.Fprintf(os.Stderr, "zulip_watcher: warning: topic %q does not exist in channel %q yet; waiting anyway\n", *topic, *stream)
+		}
 	}
 
 	narrow := [][]string{{"stream", *stream}}
@@ -130,15 +175,6 @@ func run(args []string, getenv func(string) string, stdout io.Writer) int {
 			c.do(dctx, http.MethodDelete, "/api/v1/events", url.Values{"queue_id": {queueID}})
 		}
 	}()
-
-	fail := func(err error) int {
-		if ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "zulip_watcher: timeout, no message")
-			return 3
-		}
-		fmt.Fprintln(os.Stderr, "zulip_watcher:", err)
-		return 1
-	}
 
 	var lastEventID int64
 	register := func() error {

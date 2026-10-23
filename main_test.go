@@ -73,6 +73,28 @@ func (f *fakeZulip) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		default:
 			w.Write([]byte(body))
 		}
+	// https://zulip.com/api/get-stream-id — GET stream; channel "ops" has id 7.
+	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/get_stream_id":
+		f.mu.Unlock()
+		if r.URL.Query().Get("stream") != "ops" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"result":"error","code":"BAD_REQUEST","msg":"Invalid channel name"}`))
+			return
+		}
+		w.Write([]byte(`{"result":"success","msg":"","stream_id":7}`))
+	// https://zulip.com/api/get-stream-by-id
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/v1/streams/"):
+		f.mu.Unlock()
+		if r.URL.Path != "/api/v1/streams/7" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"result":"error","code":"BAD_REQUEST","msg":"Invalid channel ID"}`))
+			return
+		}
+		w.Write([]byte(`{"result":"success","msg":"","stream":{"stream_id":7,"name":"ops"}}`))
+	// https://zulip.com/api/get-stream-topics
+	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/users/me/7/topics":
+		f.mu.Unlock()
+		w.Write([]byte(`{"result":"success","msg":"","topics":[{"name":"Deploy","max_id":100}]}`))
 	// https://zulip.com/api/delete-queue — DELETE queue_id.
 	case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/events":
 		b, _ := io.ReadAll(r.Body) // net/http's ParseForm ignores DELETE bodies
@@ -138,6 +160,32 @@ func TestHappyJSON(t *testing.T) {
 		if m[k] != v {
 			t.Errorf("%s = %v, want %v", k, m[k], v)
 		}
+	}
+}
+
+func TestChannelByID(t *testing.T) {
+	f := &fakeZulip{events: []string{fromHuman}}
+	if code := run([]string{"-stream", "7"}, start(t, f), &bytes.Buffer{}); code != 0 {
+		t.Fatalf("exit %d", code) // register asserts narrow uses the name "ops"
+	}
+}
+
+func TestUnknownChannel(t *testing.T) {
+	for _, s := range []string{"nope", "25"} {
+		f := &fakeZulip{}
+		if code := run([]string{"-stream", s}, start(t, f), &bytes.Buffer{}); code != 1 {
+			t.Errorf("%s: exit %d, want 1", s, code)
+		}
+		if f.regs != 0 {
+			t.Errorf("%s: registered %d queues, want 0", s, f.regs)
+		}
+	}
+}
+
+func TestNewTopic(t *testing.T) { // unknown topic only warns
+	f := &fakeZulip{topic: "fresh", events: []string{fromHuman}}
+	if code := run([]string{"-stream", "ops", "-topic", "fresh"}, start(t, f), &bytes.Buffer{}); code != 0 {
+		t.Fatalf("exit %d", code)
 	}
 }
 
