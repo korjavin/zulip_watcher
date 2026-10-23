@@ -39,13 +39,14 @@ with only the new message.
 
 ## How it works
 
-1. Registers an event queue with the Zulip API, narrowed to your channel (and topic).
+1. Checks the channel exists (accepting a name or an ID) and warns if the topic is new.
+2. Registers an event queue with the Zulip API, narrowed to your channel (and topic).
    See [register an event queue](https://zulip.com/api/register-queue).
-2. Long-polls [`GET /events`](https://zulip.com/api/get-events) (see the
+3. Long-polls [`GET /events`](https://zulip.com/api/get-events) (see the
    [real-time events API](https://zulip.com/api/real-time-events)); the server holds
    the request open until something happens.
-3. Ignores messages sent by the bot itself.
-4. Prints the first other message and exits (the event queue is deleted on the way out).
+4. Ignores messages sent by the bot itself.
+5. Prints the first other message and exits (the event queue is deleted on the way out).
 
 ## Install
 
@@ -102,12 +103,17 @@ Flags:
 
 | Flag             | Meaning                                                  |
 |------------------|----------------------------------------------------------|
-| `-stream NAME`   | Channel to watch (required)                              |
+| `-stream NAME`   | Channel name or numeric ID to watch (required)           |
 | `-topic NAME`    | Only messages in this topic (optional)                   |
 | `-timeout DUR`   | Give up after this long, Go duration (`30m`, `1h`); `0` = forever (default) |
 | `-json`          | Print one JSON object instead of text                    |
 
 "New" means sent after the tool started. Messages from the bot itself are ignored.
+
+Before waiting, the channel is checked: an unknown name or ID exits `1` right away
+instead of waiting forever. A numeric `-stream` that is not a channel name is
+resolved as a channel ID. A `-topic` that doesn't exist yet only prints a warning
+to stderr, since you may start watching before posting to a new topic.
 
 ## Output
 
@@ -131,7 +137,7 @@ Diagnostics go to stderr only.
 | Code | Meaning                                                        |
 |------|----------------------------------------------------------------|
 | 0    | A message was printed                                          |
-| 1    | Zulip API / network / auth error                               |
+| 1    | Unknown channel, or Zulip API / network / auth error           |
 | 2    | Usage error: missing `-stream`, missing env var, bad flag      |
 | 3    | `-timeout` elapsed with no matching message (stdout empty)     |
 
